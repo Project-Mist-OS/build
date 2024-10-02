@@ -1203,12 +1203,689 @@ unset syswrite
 unset tomlgrep
 unset treegrep
 
+function setup_ccache() {
+    if [ -z "${CCACHE_EXEC}" ]; then
+        if command -v ccache &>/dev/null; then
+            export USE_CCACHE=1
+            export CCACHE_EXEC=$(command -v ccache)
+            [ -z "${CCACHE_DIR}" ] && export CCACHE_DIR="$HOME/.ccache"
+            echo "ccache directory found, CCACHE_DIR set to: $CCACHE_DIR" >&2
+            CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-40G}"
+            DIRECT_MODE="${DIRECT_MODE:-false}"
+            $CCACHE_EXEC -o compression=true -o direct_mode="${DIRECT_MODE}" -M "${CCACHE_MAXSIZE}" \
+                && echo "ccache enabled, CCACHE_EXEC set to: $CCACHE_EXEC, CCACHE_MAXSIZE set to: $CCACHE_MAXSIZE, direct_mode set to: $DIRECT_MODE" >&2 \
+                || echo "Warning: Could not set cache size limit. Please check ccache configuration." >&2
+            CURRENT_CCACHE_SIZE=$(du -sh "$CCACHE_DIR" 2>/dev/null | cut -f1)
+            if [ -n "$CURRENT_CCACHE_SIZE" ]; then
+                echo "Current ccache size is: $CURRENT_CCACHE_SIZE" >&2
+            else
+                echo "No cached files in ccache." >&2
+            fi
+        else
+            echo "Error: ccache not found. Please install ccache." >&2
+        fi
+    fi
+}
+
+function mistupload() {
+    read -p "Enter your SourceForge username: " sf_username
+    target_device="$(get_build_var TARGET_DEVICE)"
+    package_type="$(get_build_var MIST_PACKAGE_TYPE)"
+    mist_version="$(get_build_var MIST_VERSION)"
+    mist_version="${mist_version%.*}.x"
+    product_out="out/target/product/$target_device/"
+    source_file="$(find "$product_out" -maxdepth 1 -type f -name 'MistOS-*.zip' -print -quit)"
+    
+    if [ -z "$source_file" ]; then
+        echo "Error: Could not find MistOS zip file in $product_out"
+        return 1
+    fi
+    
+    filename="$(basename "$source_file" .zip)"
+    destination="${sf_username}@frs.sourceforge.net:/home/frs/project/project-mistos/files/Android14/$target_device/"
+    rsync -e ssh "$source_file" "$destination"
+}
+
+function mistify() {
+    local device="$1"
+    local build_type="$2"
+    source ${ANDROID_BUILD_TOP}/vendor/lineage/vars/aosp_target_release
+
+    if [ -z "$device" ]; then
+        if [[ -n "$TARGET_PRODUCT" ]]; then
+            device=$(echo "$TARGET_PRODUCT" | sed -E 's/lineage_([^_]+).*/\1/')
+            echo "No argument found for device, using TARGET_PRODUCT as device: $device"
+        else
+            echo "Correct usage: riseup <device_codename> [build_type]"
+            echo "Available build types: user, userdebug, eng"
+            return 1
+        fi
+    fi
+
+    if [ -z "$build_type" ]; then
+        build_type="userdebug"
+    fi
+
+    case "$build_type" in
+        user|userdebug|eng)
+        lunch lineage_"$device"-"$aosp_target_release"-"$build_type"
+        ;;
+        *)
+        echo "Invalid build type."
+        echo "Available build types are: user, userdebug & eng"
+        ;;
+    esac
+}
+
+function ascend() {
+    if [[ -z "$TARGET_PRODUCT" ]]; then
+        echo "Error: No device target set. Please use 'riseup' or 'lunch' to set the target device."
+        return 1
+    fi
+
+    echo "ascend is deprecated. Please use rise instead."
+    echo "Usage: mistify [b|fb]"
+    echo "   b   - Build bacon"
+    echo "   fb  - Fastboot update"
+
+    case "$1" in
+        "fastboot")
+            mistify fb
+            ;;
+        *)
+            mistify b
+            ;;
+    esac
+}
+
+function mist() {
+    if [[ "$1" == "help" ]]; then
+        echo "Usage: mist [b|fb|sb] [-j<num_cores>]"
+        echo "   b   - Build bacon"
+        echo "   fb  - Fastboot update"
+        echo "   sb  - Signed Build"
+        echo "   -j<num_cores>  - Specify the number of cores to use for the build"
+        return 0
+    fi
+
+    if [[ -z "$TARGET_PRODUCT" ]]; then
+        echo "Error: No device target set. Please use 'mistify' or 'lunch' to set the target device."
+        return 1
+    fi
+
+    m installclean
+
+    local jCount=""
+    local cmd=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -j*)
+                jCount="$1"
+                ;;
+            b|fb|sb)
+                cmd="$1"
+                ;;
+            *)
+                echo "Error: Invalid argument mode. Please use 'b', 'fb', 'sb', 'help', or a job count flag like '-j<number>'."
+                echo "Usage: mistify [b|fb|sb] [-j<num_cores>]"
+                return 1
+                ;;
+        esac
+        shift
+    done
+
+    case "$cmd" in
+        sb)
+            if [[ ! -f "$ANDROID_KEY_PATH/releasekey.pk8" || ! -f "$ANDROID_KEY_PATH/releasekey.x509.pem" ]]; then
+                echo "Keys not found. Generating keys..."
+                gk -f
+            fi
+            echo "Reminder: Please ensure that you have generated keys using 'gk -f' before running 'rise sb'."
+            sign_build ${jCount:--j$(nproc --all)}
+            ;;
+        b)
+            m bacon ${jCount:--j$(nproc --all)}
+            ;;
+        fb)
+            m updatepackage ${jCount:--j$(nproc --all)}
+            ;;
+        "")
+            m ${jCount:--j$(nproc --all)}
+            ;;
+    esac
+}
+
+function add_remote() {
+    local remote_name="$1"
+    local remote_url="$2"
+    local manifest_path="android/snippets/mist.xml"
+    local exclusion_list=("android" "vendor/official_devices" "packages/apps/FaceUnlock" "vendor/gms")
+    if [[ -z "$remote_name" || -z "$remote_url" ]]; then
+        echo "Usage: add_remote <remote_name> <remote_url>"
+        return 1
+    fi
+    echo "Adding remote '$remote_name' with URL '$remote_url' to repositories in manifest: $manifest_path"
+    while IFS= read -r line; do
+        if [[ $line == *"<project "* && $line == *"remote="* ]]; then
+            local repo_path=$(echo "$line" | grep -oP 'path="\K[^"]+')
+            local manifest_entry=$(echo "$line" | grep -oP 'name="\K[^"]+')
+            local existing_remote=$(echo "$line" | grep -oP 'remote="\K[^"]+')
+            if [[ ! " ${exclusion_list[@]} " =~ " $repo_path " ]]; then
+                if [[ "$existing_remote" != "$remote_name" ]]; then
+                    local new_url="$remote_url/$manifest_entry"
+                    git -C "$repo_path" remote add "$remote_name" "$new_url"
+                    echo "Added remote '$remote_name' with URL '$new_url' to repository: $repo_path"
+                else
+                    echo "Remote '$remote_name' already exists in repository: $repo_path"
+                fi
+            else
+                echo "Repository '$repo_path' is in the exclusion list. Skipping..."
+            fi
+        fi
+    done < "$manifest_path"
+}
+
+function remove_remote() {
+    local remote_name="$1"
+    local manifest_path="android/snippets/mist.xml"
+    if [[ -z "$remote_name" ]]; then
+        echo "Usage: remove_remote <remote_name>"
+        return 1
+    fi
+    echo "Removing remote '$remote_name' from repositories in manifest: $manifest_path"
+    while IFS= read -r line; do
+        if [[ $line == *"<project "* && $line == *"remote="* ]]; then
+            local repo_path=$(echo "$line" | grep -oP 'path="\K[^"]+')
+            if git -C "$repo_path" remote | grep -q "^$remote_name$"; then
+                git -C "$repo_path" remote remove "$remote_name"
+                echo "Removed remote '$remote_name' from repository: $repo_path"
+            else
+                echo "Remote '$remote_name' doesn't exist in repository: $repo_path"
+            fi
+        fi
+    done < "$manifest_path"
+}
+
+function force_push() {
+    local remote_name="$1"
+    local remote_branch="$2"
+    local manifest_path="android/snippets/mist.xml"
+    local exclusion_list=("android" "vendor/official_devices" "packages/apps/FaceUnlock" "vendor/gms")
+    echo "Pushing changes to remote '$remote_name' in repositories from manifest: $manifest_path"
+    while IFS= read -r line; do
+        if [[ $line == *"<project "* && $line == *"remote="* ]]; then
+            local repo_path=$(echo "$line" | grep -oP 'path="\K[^"]+')
+            local remote=$(echo "$line" | grep -oP 'remote="\K[^"]+')
+            local branch=$(echo "$line" | grep -oP 'revision="\K[^"]+')
+            if [[ ! "$remote" =~ ^(staging|mist)$ ]]; then
+                echo "Invalid remote '$remote' for repository '$repo_path'. Skipping..."
+                continue
+            fi
+            if [[ " ${exclusion_list[@]} " =~ " $repo_path " ]]; then
+                echo "Repository '$repo_path' is in the exclusion list. Skipping..."
+                continue
+            fi
+            if [[ -n "$remote_branch" ]]; then
+                branch="$remote_branch"
+            fi
+            echo "Pushing changes from branch '$branch' to remote '$remote_name' in repository: $repo_path"
+            if ! git -C "$repo_path" show-ref --quiet refs/heads/"$branch"; then
+                git -C "$repo_path" checkout -b "$branch" &> /dev/null
+            fi
+            git -C "$repo_path" push -f "$remote_name" "$branch" 2>&1 | grep -v "already exists"
+        fi
+    done < "$manifest_path"
+}
+
+function setupGlobalThinLto() {
+    local option="$1"
+    if [[ "$option" == "true" ]]; then
+        echo "Building with ThinLTO."
+        export GLOBAL_THINLTO=true
+        export USE_THINLTO_CACHE=true
+    elif [[ "$option" == "false" ]]; then
+        echo "Disabling ThinLTO."
+        export GLOBAL_THINLTO=false
+        export USE_THINLTO_CACHE=false
+    else
+        echo "Invalid option. Please provide either 'true' or 'false'."
+    fi
+}
+
+# usage:
+# pushRepo 190000 main fourteen
+function pushRepo() {
+    total_heads=$1
+    remote=$2
+    branch=$3
+    repo_path=$4
+    while [ $total_heads -gt 0 ]
+    do
+        commit_offset=$(( total_heads - 10000 ))
+        if [ $commit_offset -lt 0 ]; then
+            commit_offset=0
+        fi
+        git -C "$repo_path" push -u $remote HEAD~$commit_offset:refs/heads/$branch
+
+        total_heads=$(( total_heads - 10000 ))
+    done
+}
+
+function remove_broken_build_tools() {
+    rm -rf prebuilts/build-tools/path/*/date
+    rm -rf prebuilts/build-tools/path/*/tar
+}
+
+function generate_keys() {
+    local subject="/C=US/ST=California/L=Los Angeles/O=mistOS/OU=mistOS/CN=mistOS"
+    echo "Subject string: $subject"
+    local key_names=("${@}")
+    if [ -d "$ANDROID_KEY_PATH" ]; then
+        echo "Cleaning up $ANDROID_KEY_PATH while preserving .git..."
+        find "$ANDROID_KEY_PATH" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+    fi
+    mkdir -p "$ANDROID_KEY_PATH"
+    for key_name in "${key_names[@]}"; do
+        if [ -f "$ANDROID_KEY_PATH/$key_name.pk8" ] || [ -f "$ANDROID_KEY_PATH/$key_name.x509.pem" ]; then
+            echo "Deleting existing files for $key_name..."
+            rm -f "$ANDROID_KEY_PATH/$key_name.pk8" "$ANDROID_KEY_PATH/$key_name.x509.pem"
+        fi
+        echo "Executing make_key for $key_name without password..."
+        echo "" | ./development/tools/make_key "$ANDROID_KEY_PATH/$key_name" "$subject"
+    done
+}
+
+function show_help() {
+    echo "Usage: gk [option]"
+    echo ""
+    echo "Options:"
+    echo "  -s          Generate keys for simple signing"
+    echo "  -f          Generate keys for full build signing"
+    echo "  -h, --help  Show generate keys instructions"
+}
+
+function gk() {
+    local mode="$1"
+    case "$mode" in
+        -h|--help)
+            show_help
+            return 0
+            ;;
+        -s)
+            local key_names=("nfc" "bluetooth" "media" "networkstack" "platform" "releasekey" "sdk_sandbox" "shared" "testkey" "verifiedboot")
+            ;;
+        -f)
+            local key_names=("nfc" "bluetooth" "media" "networkstack" "platform" "releasekey" "sdk_sandbox" "shared" "testcert" "testkey" "verity")
+            ;;
+        *)
+            show_help
+            return 0
+            ;;
+    esac
+    echo "Generating keys..."
+    generate_keys "${key_names[@]}"
+    echo "PRODUCT_DEFAULT_DEV_CERTIFICATE := vendor/lineage-priv/keys/releasekey" > vendor/lineage-priv/keys/keys.mk
+    bazel_build_content="filegroup(
+    name = \"android_certificate_directory\",
+    srcs = glob([
+        \"*.pk8\",
+        \"*.pem\",
+    ]),
+    visibility = [\"//visibility:public\"],
+)"
+    echo "$bazel_build_content" > vendor/lineage-priv/keys/BUILD.bazel
+    if [ "$mode" == "-f" ]; then
+        local subject="/C=US/ST=California/L=Los Angeles/O=mistOS/OU=mistOS/CN=mistOS"
+        cp ./development/tools/make_key $ANDROID_KEY_PATH/
+        sed -i 's|2048|4096|g' $ANDROID_KEY_PATH/make_key
+        for apex in com.android.adbd com.android.adservices com.android.adservices.api com.android.appsearch com.android.art com.android.bluetooth com.android.btservices com.android.cellbroadcast com.android.compos com.android.configinfrastructure com.android.connectivity.resources com.android.conscrypt com.android.devicelock com.android.extservices com.android.graphics.pdf com.android.hardware.biometrics.face.virtual com.android.hardware.biometrics.fingerprint.virtual com.android.hardware.boot com.android.hardware.cas com.android.hardware.wifi com.android.healthfitness com.android.hotspot2.osulogin com.android.i18n com.android.ipsec com.android.media com.android.media.swcodec com.android.mediaprovider com.android.nearby.halfsheet com.android.networkstack.tethering com.android.neuralnetworks com.android.ondevicepersonalization com.android.os.statsd com.android.permission com.android.resolv com.android.rkpd com.android.runtime com.android.safetycenter.resources com.android.scheduling com.android.sdkext com.android.support.apexer com.android.telephony com.android.telephonymodules com.android.tethering com.android.tzdata com.android.uwb com.android.uwb.resources com.android.virt com.android.vndk.current com.android.vndk.current.on_vendor com.android.wifi com.android.wifi.dialog com.android.wifi.resources com.google.pixel.camera.hal com.google.pixel.vibrator.hal com.qorvo.uwb; do
+            if [ -f "$ANDROID_KEY_PATH/$apex.pk8" ] || [ -f "$ANDROID_KEY_PATH/$apex.x509.pem" ]; then
+                echo "Deleting existing files for $apex..."
+                rm -f "$ANDROID_KEY_PATH/$apex.pk8" "$ANDROID_KEY_PATH/$apex.x509.pem"
+            fi
+            echo "" | $ANDROID_KEY_PATH/make_key $ANDROID_KEY_PATH/$apex "$subject"
+            openssl pkcs8 -in $ANDROID_KEY_PATH/$apex.pk8 -inform DER -nocrypt -out $ANDROID_KEY_PATH/$apex.pem
+        done
+    fi
+}
+
+function remove_keys() {
+    local key_mk="vendor/lineage-priv/keys/keys.mk"
+    local build_bazel="vendor/lineage-priv/keys/BUILD.bazel"
+    if [ -f "$key_mk" ]; then
+        echo "Removing $key_mk..."
+        rm -f "$key_mk"
+    else
+        echo "$key_mk does not exist."
+    fi
+    if [ -f "$build_bazel" ]; then
+        echo "Removing $build_bazel..."
+        rm -f "$build_bazel"
+    else
+        echo "$build_bazel does not exist."
+    fi
+}
+
+function sign_build() {
+    local mist_build_version="$(get_build_var MIST_BUILD_VERSION)"
+    local mist_version="$(get_build_var MIST_VERSION)"
+    local mist_codename="$(get_build_var MIST_CODENAME)"
+    local mist_package_type="$(get_build_var MIST_PACKAGE_TYPE)"
+    local mist_release_type="$(get_build_var MIST_RELEASE_TYPE)"
+    local target_device="$(get_build_var TARGET_DEVICE)"
+    local jobCount="$1"
+    local key_path="$ANDROID_BUILD_TOP/vendor/lineage-priv/signing/keys"
+    if ! m target-files-package otatools "$jobCount"; then
+        echo "Build failed, skipping signing of the package."
+        return 1
+    fi
+    sign_target_files
+    genSignedOta
+    local source_file="$OUT/signed-ota_update.zip"
+    local target_file="$OUT/MistOS-$mist_build_version-ota-signed.zip"
+    if [[ -e "$source_file" ]]; then
+        mv "$source_file" "$target_file"
+        echo "Renamed $source_file to $target_file"
+    else
+        echo "File $source_file does not exist."
+        return 1
+    fi
+    echo "Creating MistOS JSON OTA..."
+    $ANDROID_BUILD_TOP/vendor/mist/build/tools/createjson.sh "$target_device" "$OUT" "MistOS-$mist_build_version-ota-signed.zip" "$mist_version" "$mist_codename" "$mist_package_type" "$mist_release_type"
+    local json_file="${mist_package_type}_${target_device}.json"
+    cp -f "$OUT/$json_file" "vendor/official_devices/$json_file"
+    echo "MistOS JSON OTA created and copied."
+}
+
+function sign_target_files() {
+    croot
+    sign_target_files_apks -o -d $ANDROID_KEY_PATH \
+        --extra_apks AdServicesApk.apk=$ANDROID_KEY_PATH/releasekey \
+        --extra_apks HalfSheetUX.apk=$ANDROID_KEY_PATH/releasekey \
+        --extra_apks OsuLogin.apk=$ANDROID_KEY_PATH/releasekey \
+        --extra_apks SafetyCenterResources.apk=$ANDROID_KEY_PATH/releasekey \
+        --extra_apks ServiceConnectivityResources.apk=$ANDROID_KEY_PATH/releasekey \
+        --extra_apks ServiceUwbResources.apk=$ANDROID_KEY_PATH/releasekey \
+        --extra_apks ServiceWifiResources.apk=$ANDROID_KEY_PATH/releasekey \
+        --extra_apks WifiDialog.apk=$ANDROID_KEY_PATH/releasekey \
+        --extra_apks com.android.adbd.apex=$ANDROID_KEY_PATH/com.android.adbd \
+        --extra_apks com.android.adservices.apex=$ANDROID_KEY_PATH/com.android.adservices \
+        --extra_apks com.android.adservices.api.apex=$ANDROID_KEY_PATH/com.android.adservices.api \
+        --extra_apks com.android.appsearch.apex=$ANDROID_KEY_PATH/com.android.appsearch \
+        --extra_apks com.android.art.apex=$ANDROID_KEY_PATH/com.android.art \
+        --extra_apks com.android.bluetooth.apex=$ANDROID_KEY_PATH/com.android.bluetooth \
+        --extra_apks com.android.btservices.apex=$ANDROID_KEY_PATH/com.android.btservices \
+        --extra_apks com.android.cellbroadcast.apex=$ANDROID_KEY_PATH/com.android.cellbroadcast \
+        --extra_apks com.android.compos.apex=$ANDROID_KEY_PATH/com.android.compos \
+        --extra_apks com.android.configinfrastructure.apex=$ANDROID_KEY_PATH/com.android.configinfrastructure \
+        --extra_apks com.android.connectivity.resources.apex=$ANDROID_KEY_PATH/com.android.connectivity.resources \
+        --extra_apks com.android.conscrypt.apex=$ANDROID_KEY_PATH/com.android.conscrypt \
+        --extra_apks com.android.devicelock.apex=$ANDROID_KEY_PATH/com.android.devicelock \
+        --extra_apks com.android.extservices.apex=$ANDROID_KEY_PATH/com.android.extservices \
+        --extra_apks com.android.graphics.pdf.apex=$ANDROID_KEY_PATH/com.android.graphics.pdf \
+        --extra_apks com.android.hardware.biometrics.face.virtual.apex=$ANDROID_KEY_PATH/com.android.hardware.biometrics.face.virtual \
+        --extra_apks com.android.hardware.biometrics.fingerprint.virtual.apex=$ANDROID_KEY_PATH/com.android.hardware.biometrics.fingerprint.virtual \
+        --extra_apks com.android.hardware.boot.apex=$ANDROID_KEY_PATH/com.android.hardware.boot \
+        --extra_apks com.android.hardware.cas.apex=$ANDROID_KEY_PATH/com.android.hardware.cas \
+        --extra_apks com.android.hardware.wifi.apex=$ANDROID_KEY_PATH/com.android.hardware.wifi \
+        --extra_apks com.android.healthfitness.apex=$ANDROID_KEY_PATH/com.android.healthfitness \
+        --extra_apks com.android.hotspot2.osulogin.apex=$ANDROID_KEY_PATH/com.android.hotspot2.osulogin \
+        --extra_apks com.android.i18n.apex=$ANDROID_KEY_PATH/com.android.i18n \
+        --extra_apks com.android.ipsec.apex=$ANDROID_KEY_PATH/com.android.ipsec \
+        --extra_apks com.android.media.apex=$ANDROID_KEY_PATH/com.android.media \
+        --extra_apks com.android.media.swcodec.apex=$ANDROID_KEY_PATH/com.android.media.swcodec \
+        --extra_apks com.android.mediaprovider.apex=$ANDROID_KEY_PATH/com.android.mediaprovider \
+        --extra_apks com.android.nearby.halfsheet.apex=$ANDROID_KEY_PATH/com.android.nearby.halfsheet \
+        --extra_apks com.android.networkstack.tethering.apex=$ANDROID_KEY_PATH/com.android.networkstack.tethering \
+        --extra_apks com.android.neuralnetworks.apex=$ANDROID_KEY_PATH/com.android.neuralnetworks \
+        --extra_apks com.android.ondevicepersonalization.apex=$ANDROID_KEY_PATH/com.android.ondevicepersonalization \
+        --extra_apks com.android.os.statsd.apex=$ANDROID_KEY_PATH/com.android.os.statsd \
+        --extra_apks com.android.permission.apex=$ANDROID_KEY_PATH/com.android.permission \
+        --extra_apks com.android.resolv.apex=$ANDROID_KEY_PATH/com.android.resolv \
+        --extra_apks com.android.rkpd.apex=$ANDROID_KEY_PATH/com.android.rkpd \
+        --extra_apks com.android.runtime.apex=$ANDROID_KEY_PATH/com.android.runtime \
+        --extra_apks com.android.safetycenter.resources.apex=$ANDROID_KEY_PATH/com.android.safetycenter.resources \
+        --extra_apks com.android.scheduling.apex=$ANDROID_KEY_PATH/com.android.scheduling \
+        --extra_apks com.android.sdkext.apex=$ANDROID_KEY_PATH/com.android.sdkext \
+        --extra_apks com.android.support.apexer.apex=$ANDROID_KEY_PATH/com.android.support.apexer \
+        --extra_apks com.android.telephony.apex=$ANDROID_KEY_PATH/com.android.telephony \
+        --extra_apks com.android.telephonymodules.apex=$ANDROID_KEY_PATH/com.android.telephonymodules \
+        --extra_apks com.android.tethering.apex=$ANDROID_KEY_PATH/com.android.tethering \
+        --extra_apks com.android.tzdata.apex=$ANDROID_KEY_PATH/com.android.tzdata \
+        --extra_apks com.android.uwb.apex=$ANDROID_KEY_PATH/com.android.uwb \
+        --extra_apks com.android.uwb.resources.apex=$ANDROID_KEY_PATH/com.android.uwb.resources \
+        --extra_apks com.android.virt.apex=$ANDROID_KEY_PATH/com.android.virt \
+        --extra_apks com.android.vndk.current.apex=$ANDROID_KEY_PATH/com.android.vndk.current \
+        --extra_apks com.android.vndk.current.on_vendor.apex=$ANDROID_KEY_PATH/com.android.vndk.current.on_vendor \
+        --extra_apks com.android.wifi.apex=$ANDROID_KEY_PATH/com.android.wifi \
+        --extra_apks com.android.wifi.dialog.apex=$ANDROID_KEY_PATH/com.android.wifi.dialog \
+        --extra_apks com.android.wifi.resources.apex=$ANDROID_KEY_PATH/com.android.wifi.resources \
+        --extra_apks com.google.pixel.camera.hal.apex=$ANDROID_KEY_PATH/com.google.pixel.camera.hal \
+        --extra_apks com.google.pixel.vibrator.hal.apex=$ANDROID_KEY_PATH/com.google.pixel.vibrator.hal \
+        --extra_apks com.qorvo.uwb.apex=$ANDROID_KEY_PATH/com.qorvo.uwb \
+        --extra_apex_payload_key com.android.adbd.apex=$ANDROID_KEY_PATH/com.android.adbd.pem \
+        --extra_apex_payload_key com.android.adservices.apex=$ANDROID_KEY_PATH/com.android.adservices.pem \
+        --extra_apex_payload_key com.android.adservices.api.apex=$ANDROID_KEY_PATH/com.android.adservices.api.pem \
+        --extra_apex_payload_key com.android.appsearch.apex=$ANDROID_KEY_PATH/com.android.appsearch.pem \
+        --extra_apex_payload_key com.android.art.apex=$ANDROID_KEY_PATH/com.android.art.pem \
+        --extra_apex_payload_key com.android.bluetooth.apex=$ANDROID_KEY_PATH/com.android.bluetooth.pem \
+        --extra_apex_payload_key com.android.btservices.apex=$ANDROID_KEY_PATH/com.android.btservices.pem \
+        --extra_apex_payload_key com.android.cellbroadcast.apex=$ANDROID_KEY_PATH/com.android.cellbroadcast.pem \
+        --extra_apex_payload_key com.android.compos.apex=$ANDROID_KEY_PATH/com.android.compos.pem \
+        --extra_apex_payload_key com.android.configinfrastructure.apex=$ANDROID_KEY_PATH/com.android.configinfrastructure.pem \
+        --extra_apex_payload_key com.android.connectivity.resources.apex=$ANDROID_KEY_PATH/com.android.connectivity.resources.pem \
+        --extra_apex_payload_key com.android.conscrypt.apex=$ANDROID_KEY_PATH/com.android.conscrypt.pem \
+        --extra_apex_payload_key com.android.devicelock.apex=$ANDROID_KEY_PATH/com.android.devicelock.pem \
+        --extra_apex_payload_key com.android.extservices.apex=$ANDROID_KEY_PATH/com.android.extservices.pem \
+        --extra_apex_payload_key com.android.graphics.pdf.apex=$ANDROID_KEY_PATH/com.android.graphics.pdf.pem \
+        --extra_apex_payload_key com.android.hardware.biometrics.face.virtual.apex=$ANDROID_KEY_PATH/com.android.hardware.biometrics.face.virtual.pem \
+        --extra_apex_payload_key com.android.hardware.biometrics.fingerprint.virtual.apex=$ANDROID_KEY_PATH/com.android.hardware.biometrics.fingerprint.virtual.pem \
+        --extra_apex_payload_key com.android.hardware.boot.apex=$ANDROID_KEY_PATH/com.android.hardware.boot.pem \
+        --extra_apex_payload_key com.android.hardware.cas.apex=$ANDROID_KEY_PATH/com.android.hardware.cas.pem \
+        --extra_apex_payload_key com.android.hardware.wifi.apex=$ANDROID_KEY_PATH/com.android.hardware.wifi.pem \
+        --extra_apex_payload_key com.android.healthfitness.apex=$ANDROID_KEY_PATH/com.android.healthfitness.pem \
+        --extra_apex_payload_key com.android.hotspot2.osulogin.apex=$ANDROID_KEY_PATH/com.android.hotspot2.osulogin.pem \
+        --extra_apex_payload_key com.android.i18n.apex=$ANDROID_KEY_PATH/com.android.i18n.pem \
+        --extra_apex_payload_key com.android.ipsec.apex=$ANDROID_KEY_PATH/com.android.ipsec.pem \
+        --extra_apex_payload_key com.android.media.apex=$ANDROID_KEY_PATH/com.android.media.pem \
+        --extra_apex_payload_key com.android.media.swcodec.apex=$ANDROID_KEY_PATH/com.android.media.swcodec.pem \
+        --extra_apex_payload_key com.android.mediaprovider.apex=$ANDROID_KEY_PATH/com.android.mediaprovider.pem \
+        --extra_apex_payload_key com.android.nearby.halfsheet.apex=$ANDROID_KEY_PATH/com.android.nearby.halfsheet.pem \
+        --extra_apex_payload_key com.android.networkstack.tethering.apex=$ANDROID_KEY_PATH/com.android.networkstack.tethering.pem \
+        --extra_apex_payload_key com.android.neuralnetworks.apex=$ANDROID_KEY_PATH/com.android.neuralnetworks.pem \
+        --extra_apex_payload_key com.android.ondevicepersonalization.apex=$ANDROID_KEY_PATH/com.android.ondevicepersonalization.pem \
+        --extra_apex_payload_key com.android.os.statsd.apex=$ANDROID_KEY_PATH/com.android.os.statsd.pem \
+        --extra_apex_payload_key com.android.permission.apex=$ANDROID_KEY_PATH/com.android.permission.pem \
+        --extra_apex_payload_key com.android.resolv.apex=$ANDROID_KEY_PATH/com.android.resolv.pem \
+        --extra_apex_payload_key com.android.rkpd.apex=$ANDROID_KEY_PATH/com.android.rkpd.pem \
+        --extra_apex_payload_key com.android.runtime.apex=$ANDROID_KEY_PATH/com.android.runtime.pem \
+        --extra_apex_payload_key com.android.safetycenter.resources.apex=$ANDROID_KEY_PATH/com.android.safetycenter.resources.pem \
+        --extra_apex_payload_key com.android.scheduling.apex=$ANDROID_KEY_PATH/com.android.scheduling.pem \
+        --extra_apex_payload_key com.android.sdkext.apex=$ANDROID_KEY_PATH/com.android.sdkext.pem \
+        --extra_apex_payload_key com.android.support.apexer.apex=$ANDROID_KEY_PATH/com.android.support.apexer.pem \
+        --extra_apex_payload_key com.android.telephony.apex=$ANDROID_KEY_PATH/com.android.telephony.pem \
+        --extra_apex_payload_key com.android.telephonymodules.apex=$ANDROID_KEY_PATH/com.android.telephonymodules.pem \
+        --extra_apex_payload_key com.android.tethering.apex=$ANDROID_KEY_PATH/com.android.tethering.pem \
+        --extra_apex_payload_key com.android.tzdata.apex=$ANDROID_KEY_PATH/com.android.tzdata.pem \
+        --extra_apex_payload_key com.android.uwb.apex=$ANDROID_KEY_PATH/com.android.uwb.pem \
+        --extra_apex_payload_key com.android.uwb.resources.apex=$ANDROID_KEY_PATH/com.android.uwb.resources.pem \
+        --extra_apex_payload_key com.android.virt.apex=$ANDROID_KEY_PATH/com.android.virt.pem \
+        --extra_apex_payload_key com.android.vndk.current.apex=$ANDROID_KEY_PATH/com.android.vndk.current.pem \
+        --extra_apex_payload_key com.android.vndk.current.on_vendor.apex=$ANDROID_KEY_PATH/com.android.vndk.current.on_vendor.pem \
+        --extra_apex_payload_key com.android.wifi.apex=$ANDROID_KEY_PATH/com.android.wifi.pem \
+        --extra_apex_payload_key com.android.wifi.dialog.apex=$ANDROID_KEY_PATH/com.android.wifi.dialog.pem \
+        --extra_apex_payload_key com.android.wifi.resources.apex=$ANDROID_KEY_PATH/com.android.wifi.resources.pem \
+        --extra_apex_payload_key com.google.pixel.camera.hal.apex=$ANDROID_KEY_PATH/com.google.pixel.camera.hal.pem \
+        --extra_apex_payload_key com.google.pixel.vibrator.hal.apex=$ANDROID_KEY_PATH/com.google.pixel.vibrator.hal.pem \
+        --extra_apex_payload_key com.qorvo.uwb.apex=$ANDROID_KEY_PATH/com.qorvo.uwb.pem \
+        $OUT/obj/PACKAGING/target_files_intermediates/*-target_files*.zip \
+        $OUT/signed-target_files.zip
+}
+
+function genSignedOta() {
+    ota_from_target_files -k $ANDROID_KEY_PATH/releasekey \
+        --block --backup=true \
+        $OUT/signed-target_files.zip \
+        $OUT/signed-ota_update.zip
+}
+
+function extractSI() {
+    local mist_build_version="$(get_build_var MIST_BUILD_VERSION)"
+    rm -rf $OUT/signed_builds_images
+    unzip $OUT/MistOS-$mist_build_version-ota-signed.zip -d $OUT/signed_builds_images
+    prebuilts/extract-tools/linux-x86/bin/ota_extractor --payload $OUT/signed_builds_images/payload.bin
+    if [ ! -d "$OUT/signed_builds_images" ]; then
+        mkdir $OUT/signed_builds_images
+    fi
+    rm -f $OUT/signed_builds_images/*.img
+    if ls *.img 1> /dev/null 2>&1; then
+        mv *.img $OUT/signed_builds_images
+    else
+        echo "No .img files found to move."
+        return 1
+    fi
+}
+
+function flashESI() {
+    extractSI
+    adb reboot fastboot &> /dev/null
+    if ! command -v fastboot &> /dev/null; then
+        echo "fastboot command not found."
+        return 1
+    fi
+    if [ -f "$OUT/signed_builds_images/system.img" ]; then
+        fastboot flash system $OUT/signed_builds_images/system.img || { echo "Failed to flash system.img"; return 1; }
+    else
+        echo "system.img not found in $OUT/signed_builds_images."
+        return 1
+    fi
+    if [ -f "$OUT/signed_builds_images/system_ext.img" ]; then
+        fastboot flash system_ext $OUT/signed_builds_images/system_ext.img || { echo "Failed to flash system_ext.img"; return 1; }
+    else
+        echo "system_ext.img not found in $OUT/signed_builds_images."
+        return 1
+    fi
+    if [ -f "$OUT/signed_builds_images/product.img" ]; then
+        fastboot flash product $OUT/signed_builds_images/product.img || { echo "Failed to flash product.img"; return 1; }
+    else
+        echo "product.img not found in $OUT/signed_builds_images."
+        return 1
+    fi
+    fastboot reboot || { echo "Failed to reboot the device"; return 1; }
+}
+
+function dlawnchair() {
+    REPO_OWNER="Goooler"
+    REPO_NAME="LawnchairRelease"
+    OUTPUT_DIR="vendor/addons/prebuilt/Lawnchair"
+    APK_NAME="Lawnchair.apk"
+
+    echo "Fetching latest release information..."
+    mkdir -p "$OUTPUT_DIR"
+    latest_release_url=$(curl -s https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest | grep "browser_download_url" | grep ".apk" | cut -d '"' -f 4)
+    echo "Latest APK URL: $latest_release_url"
+    echo "Downloading latest APK..."
+    curl -L "$latest_release_url" -o "$OUTPUT_DIR/$APK_NAME"
+    echo "Latest APK downloaded to $OUTPUT_DIR/$APK_NAME"
+}
+
+function dlawnicons() {
+    REPO_OWNER="LawnchairLauncher"
+    REPO_NAME="lawnicons"
+    OUTPUT_DIR="vendor/addons/prebuilt/Lawnicons"
+    APK_NAME="Lawnicons.apk"
+
+    echo "Fetching latest release information..."
+    mkdir -p "$OUTPUT_DIR"
+    latest_release_url=$(curl -s https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest | grep "browser_download_url" | grep ".apk" | cut -d '"' -f 4)
+    echo "Latest APK URL: $latest_release_url"
+    echo "Downloading latest APK..."
+    curl -L "$latest_release_url" -o "$OUTPUT_DIR/$APK_NAME"
+    echo "Latest APK downloaded to $OUTPUT_DIR/$APK_NAME"
+}
+
+function rcleanup() {
+    echo "Generating list of current repositories from the manifest files..."
+
+    # Initialize current_repos.txt
+    > current_repos.txt
+
+    # Aggregate project names from manifest files in .repo/manifests
+    for manifest in .repo/manifests/default.xml .repo/manifests/snippets/crdroid.xml .repo/manifests/snippets/lineage.xml .repo/manifests/snippets/pixel.xml .repo/manifests/snippets/mist.xml; 
+    do
+        if [ -f "$manifest" ]; then
+            grep 'name=' "$manifest" | sed -e 's/.*name="\([^"]*\)".*/\1/' >> current_repos.txt
+        fi
+    done
+
+    # Append project names from .repo/local_manifests/*.xml if they exist
+    if ls .repo/local_manifests/*.xml 1> /dev/null 2>&1; then
+        grep 'name=' .repo/local_manifests/*.xml | sed -e 's/.*name="\([^"]*\)".*/\1/' >> current_repos.txt
+    fi
+
+    echo "Navigating to .repo/project-objects directory..."
+    cd .repo/project-objects || { echo "Failed to navigate to .repo/project-objects"; exit 1; }
+
+    echo "Listing all repositories in .repo/project-objects..."
+    find . -type d -name "*.git" | sed 's|^\./||' | sed 's|\.git$||' > all_repos.txt
+
+    echo "Identifying old repositories..."
+    old_repos=$(comm -23 <(sort all_repos.txt) <(sort ../../current_repos.txt))
+
+    if [ -z "$old_repos" ]; then
+        echo "No old repositories to remove."
+        rm ../../current_repos.txt
+        rm all_repos.txt
+        croot
+        return
+    fi
+
+    echo "The following repositories will be removed:"
+    echo "$old_repos"
+    
+    read -p "Do you want to proceed with the removal? (y/n): " confirm
+    if [[ "$confirm" != "y" ]]; then
+        echo "Removal cancelled."
+        rm ../../current_repos.txt
+        rm all_repos.txt
+        croot
+        return
+    fi
+
+    echo "Removing old repositories..."
+    for repo in $old_repos; do
+        echo "Removing old repository: $repo"
+        rm -rf "$repo.git"
+    done
+
+    echo "Removing temporary pack files..."
+    find . -type f -name "tmp_pack_*" -exec rm -f {} +
+
+    echo "Performing garbage collection on all repositories..."
+    repo forall -c 'git gc --prune=now --aggressive'
+
+    echo "Cleaning up temporary files..."
+    rm ../../current_repos.txt
+    rm all_repos.txt
+
+    echo "Cleanup complete."
+
+    croot
+}
+
+alias adevtool='vendor/adevtool/bin/run'
+alias adto='vendor/adevtool/bin/run'
 
 validate_current_shell
 set_global_paths
 source_vendorsetup
 addcompletions
 
+remove_broken_build_tools
+setup_ccache
+
 export ANDROID_BUILD_TOP=$(gettop)
+export ANDROID_KEY_PATH="$ANDROID_BUILD_TOP/vendor/lineage-priv/keys"
 
 . $ANDROID_BUILD_TOP/vendor/lineage/build/envsetup.sh
