@@ -213,6 +213,32 @@ else if get_stage("%(bcb_dev)s") == "3/3" then
 
   # Dump fingerprints
   script.Print("Target: {}".format(target_info.fingerprint))
+  script.Print("----------------------------------------------");
+  script.Print("         __  __ _____  _____ _______           ");
+  script.Print("        |  \/  |_   _|/ ____|__   __|          ");
+  script.Print("        | \  / | | | | (___    | |             ");
+  script.Print("        | |\/| | | |  \___ \   | |             ");
+  script.Print("        | |  | |_| |_ ____) |  | |             ");
+  script.Print("        |_|  |_|_____|_____/   |_|             ");
+  script.Print("         ____Beyond The Clouds____             ");
+  script.Print("                                               ");
+  script.Print("----------------------------------------------");
+  androidver = target_info.GetBuildProp("ro.build.version.release")
+  buildday = target_info.GetBuildProp("ro.build.date")
+  mistbuild = target_info.GetBuildProp("ro.mist.base.version")
+  securep = target_info.GetBuildProp("ro.build.version.security_patch")
+  device = target_info.GetBuildProp("ro.build.product")
+  manufacturer = target_info.GetBuildProp("ro.product.manufacturer")
+  script.Print("===============================================");
+  script.Print(" Android version  : %s"%(androidver));
+  script.Print(" Security patch   : %s"%(securep));
+  script.Print(" Build date       : %s"%(buildday));
+  script.Print("===============================================");
+  script.Print(" Mist version     : %s"%(mistbuild));
+  script.Print(" Device           : %s"%(device));
+  script.Print(" Manufacturer     : %s"%(manufacturer));
+  script.Print("===============================================");
+  script.Print("                                         ");
 
   device_specific.FullOTA_InstallBegin()
 
