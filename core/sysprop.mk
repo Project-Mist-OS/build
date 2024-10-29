@@ -70,9 +70,6 @@ define generate-common-build-props
     )\
     echo "ro.$(1).build.date=`$(DATE_FROM_FILE)`" >> $(2);\
     echo "ro.$(1).build.date.utc=`$(DATE_FROM_FILE) +%s`" >> $(2);\
-    echo "persist.sys.pihooks_FINGERPRINT?=$(PIHOOKS_BUILD_GMS_FINGERPRINT)" >> $(2);\
-    echo "persist.sys.pihooks_mainline_FINGERPRINT?=$(PIHOOKS_BUILD_FINGERPRINT)" >> $(2);\
-    echo "persist.sys.pihooks_mainline_MODEL?=$(PIHOOKS_MODEL_SPOOF)" >> $(2);\
     echo "ro.$(1).build.fingerprint?=$${BuildFingerprint:-$(BUILD_FINGERPRINT_FROM_FILE)}" >> $(2);\
     echo "ro.$(1).build.id?=$(BUILD_ID)" >> $(2);\
     echo "ro.$(1).build.tags?=$(BUILD_VERSION_TAGS)" >> $(2);\
