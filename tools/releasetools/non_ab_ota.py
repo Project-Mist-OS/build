@@ -225,7 +225,6 @@ else if get_stage("%(bcb_dev)s") == "3/3" then
   script.Print("----------------------------------------------");
   androidver = target_info.GetBuildProp("ro.build.version.release")
   buildday = target_info.GetBuildProp("ro.build.date")
-  mistbuild = target_info.GetBuildProp("ro.mist.base.version")
   securep = target_info.GetBuildProp("ro.build.version.security_patch")
   device = target_info.GetBuildProp("ro.build.product")
   manufacturer = target_info.GetBuildProp("ro.product.manufacturer")
@@ -234,7 +233,6 @@ else if get_stage("%(bcb_dev)s") == "3/3" then
   script.Print(" Security patch   : %s"%(securep));
   script.Print(" Build date       : %s"%(buildday));
   script.Print("===============================================");
-  script.Print(" Mist version     : %s"%(mistbuild));
   script.Print(" Device           : %s"%(device));
   script.Print(" Manufacturer     : %s"%(manufacturer));
   script.Print("===============================================");
