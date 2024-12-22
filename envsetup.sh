@@ -497,16 +497,32 @@ function lunch()
 
     if ! check_product $product $release
     then
-        # if we can't find a product, try to grab it off the LineageOS GitHub
+        local device_found=false
+        # if we can't find a product, try to grab it off the MistOS/LineageOS GitHub
         T=$(gettop)
+
+        # Attempt to use MistOS's roomservice
         cd $T > /dev/null
-        vendor/lineage/build/tools/roomservice.py $product
+        if vendor/mist/build/tools/roomservice.py $product; then
+            device_found=true
+        fi
         cd - > /dev/null
-        check_product $product $release
+        if ! $device_found; then
+            # Fallback to Lineage's roomservice
+            cd $T > /dev/null
+            if vendor/lineage/build/tools/roomservice.py $product; then
+                device_found=true
+            fi
+            cd - > /dev/null
+        fi
+        if ! $device_found; then
+            echo "Failed to locate device: $product"
+            return 1
+        fi
     else
         T=$(gettop)
         cd $T > /dev/null
-        vendor/lineage/build/tools/roomservice.py $product true
+        vendor/mist/build/tools/roomservice.py $product true
         cd - > /dev/null
     fi
 
@@ -1902,7 +1918,7 @@ function rcleanup() {
     > current_repos.txt
 
     # Aggregate project names from manifest files in .repo/manifests
-    for manifest in .repo/manifests/default.xml .repo/manifests/snippets/crdroid.xml .repo/manifests/snippets/lineage.xml .repo/manifests/snippets/pixel.xml .repo/manifests/snippets/mist.xml; 
+    for manifest in .repo/manifests/default.xml .repo/manifests/snippets/crdroid.xml .repo/manifests/snippets/lineage.xml .repo/manifests/snippets/pixel.xml .repo/manifests/snippets/mist.xml;
     do
         if [ -f "$manifest" ]; then
             grep 'name=' "$manifest" | sed -e 's/.*name="\([^"]*\)".*/\1/' >> current_repos.txt
