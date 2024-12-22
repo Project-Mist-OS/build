@@ -1256,7 +1256,7 @@ function mistify() {
             device=$(echo "$TARGET_PRODUCT" | sed -E 's/lineage_([^_]+).*/\1/')
             echo "No argument found for device, using TARGET_PRODUCT as device: $device"
         else
-            echo "Correct usage: riseup <device_codename> [build_type]"
+            echo "Correct usage: mistify <device_codename> [build_type]"
             echo "Available build types: user, userdebug, eng"
             return 1
         fi
@@ -1279,11 +1279,11 @@ function mistify() {
 
 function ascend() {
     if [[ -z "$TARGET_PRODUCT" ]]; then
-        echo "Error: No device target set. Please use 'riseup' or 'lunch' to set the target device."
+        echo "Error: No device target set. Please use 'mistify' or 'lunch' to set the target device."
         return 1
     fi
 
-    echo "ascend is deprecated. Please use rise instead."
+    echo "ascend is deprecated. Please use mist instead."
     echo "Usage: mistify [b|fb]"
     echo "   b   - Build bacon"
     echo "   fb  - Fastboot update"
@@ -1300,9 +1300,10 @@ function ascend() {
 
 function mist() {
     if [[ "$1" == "help" ]]; then
-        echo "Usage: mist [b|fb|sb] [-j<num_cores>]"
+        echo "Usage: mist [b|fb|fbs|sb] [-j<num_cores>]"
         echo "   b   - Build bacon"
         echo "   fb  - Fastboot update"
+        echo "   fbs - Signed Fastboot update"
         echo "   sb  - Signed Build"
         echo "   -j<num_cores>  - Specify the number of cores to use for the build"
         return 0
@@ -1323,12 +1324,12 @@ function mist() {
             -j*)
                 jCount="$1"
                 ;;
-            b|fb|sb)
+            b|fb|fbs|sb)
                 cmd="$1"
                 ;;
             *)
-                echo "Error: Invalid argument mode. Please use 'b', 'fb', 'sb', 'help', or a job count flag like '-j<number>'."
-                echo "Usage: mistify [b|fb|sb] [-j<num_cores>]"
+                echo "Error: Invalid argument mode. Please use 'b', 'fb', 'fbs', 'sb', 'help', or a job count flag like '-j<number>'."
+                echo "Usage: mistify [b|fb|fbs|sb] [-j<num_cores>]"
                 return 1
                 ;;
         esac
@@ -1341,7 +1342,7 @@ function mist() {
                 echo "Keys not found. Generating keys..."
                 gk -f
             fi
-            echo "Reminder: Please ensure that you have generated keys using 'gk -f' before running 'rise sb'."
+            echo "Reminder: Please ensure that you have generated keys using 'gk -f' before running 'mist sb'."
             sign_build ${jCount:--j$(nproc --all)}
             ;;
         b)
@@ -1349,6 +1350,14 @@ function mist() {
             ;;
         fb)
             m updatepackage ${jCount:--j$(nproc --all)}
+            ;;
+        fbs)
+            if [[ ! -f "$ANDROID_KEY_PATH/releasekey.pk8" || ! -f "$ANDROID_KEY_PATH/releasekey.x509.pem" ]]; then
+                echo "Keys not found. Generating keys..."
+                gk -f
+            fi
+            echo "Reminder: Please ensure that you have generated keys using 'gk -f' before running 'mist fbs'."
+            genSignedFastboot
             ;;
         "")
             m ${jCount:--j$(nproc --all)}
@@ -1728,6 +1737,20 @@ function genSignedOta() {
         --block --backup=true \
         $OUT/signed-target_files.zip \
         $OUT/signed-ota_update.zip
+}
+
+function genSignedFastboot() {
+    local mist_build_version="$(get_build_var MIST_BUILD_VERSION)"
+    local target_file="$OUT/signed-target_files.zip"
+    local fastboot_package="$OUT/MistOS-$mist_build_version-fastboot-signed.zip"
+    echo "Creating signed target files..."
+    m target-files-package || { echo "Failed to create target files package."; return 1; }
+    sign_target_files || { echo "Failed to sign target files."; return 1; }
+    echo "Generating signed fastboot images..."
+    img_from_target_files \
+        "$target_file" \
+        "$fastboot_package" || { echo "Failed to create fastboot images."; return 1; }
+    echo "Signed fastboot package created at: $fastboot_package"
 }
 
 function extractSI() {
