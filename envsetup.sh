@@ -1237,6 +1237,118 @@ if [ -z "${CCACHE_EXEC}" ]; then
     fi
 fi
 
+function mistify() {
+    local device="$1"
+    local build_type="$2"
+    source ${ANDROID_BUILD_TOP}/vendor/lineage/vars/aosp_target_release
+
+    if [ -z "$device" ]; then
+        if [[ -n "$TARGET_PRODUCT" ]]; then
+            device=$(echo "$TARGET_PRODUCT" | sed -E 's/lineage_([^_]+).*/\1/')
+            echo "No argument found for device, using TARGET_PRODUCT as device: $device"
+        else
+            echo "Correct usage: riseup <device_codename> [build_type]"
+            echo "Available build types: user, userdebug, eng"
+            return 1
+        fi
+    fi
+
+    if [ -z "$build_type" ]; then
+        build_type="userdebug"
+    fi
+
+    case "$build_type" in
+        user|userdebug|eng)
+        lunch lineage_"$device"-"$aosp_target_release"-"$build_type"
+        ;;
+        *)
+        echo "Invalid build type."
+        echo "Available build types are: user, userdebug & eng"
+        ;;
+    esac
+}
+
+function ascend() {
+    if [[ -z "$TARGET_PRODUCT" ]]; then
+        echo "Error: No device target set. Please use 'mistify' or 'lunch' to set the target device."
+        return 1
+    fi
+
+    echo "ascend is deprecated. Please use mistify instead."
+    echo "Usage: mistify [b|fb]"
+    echo "   b   - Build bacon"
+    echo "   fb  - Fastboot update"
+
+    case "$1" in
+        "fastboot")
+            mistify fb
+            ;;
+        *)
+            mistify b
+            ;;
+    esac
+}
+
+function mist() {
+    if [[ "$1" == "help" ]]; then
+        echo "Usage: mist [b|fb|sb] [-j<num_cores>]"
+        echo "   b   - Build bacon"
+        echo "   fb  - Fastboot update"
+        echo "   sb  - Signed Build"
+        echo "   -j<num_cores>  - Specify the number of cores to use for the build"
+        return 0
+    fi
+
+    if [[ -z "$TARGET_PRODUCT" ]]; then
+        echo "Error: No device target set. Please use 'mistify' or 'lunch' to set the target device."
+        return 1
+    fi
+
+    m installclean
+
+    local jCount=""
+    local cmd=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -j*)
+                jCount="$1"
+                ;;
+            b|fb|sb)
+                cmd="$1"
+                ;;
+            *)
+                echo "Error: Invalid argument mode. Please use 'b', 'fb', 'sb', 'help', or a job count flag like '-j<number>'."
+                echo "Usage: mistify [b|fb|sb] [-j<num_cores>]"
+                return 1
+                ;;
+        esac
+        shift
+    done
+
+    case "$cmd" in
+        sb)
+            if [[ ! -f "$ANDROID_KEY_PATH/releasekey.pk8" || ! -f "$ANDROID_KEY_PATH/releasekey.x509.pem" ]]; then
+                echo "Keys not found. Generating keys..."
+                gk -f
+            fi
+            echo "Reminder: Please ensure that you have generated keys using 'gk -f' before running 'mist sb
+
+            '."
+            sign_build ${jCount:--j$(nproc --all)}
+            ;;
+        b)
+            m bacon ${jCount:--j$(nproc --all)}
+            ;;
+        fb)
+            m updatepackage ${jCount:--j$(nproc --all)}
+            ;;
+        "")
+            m ${jCount:--j$(nproc --all)}
+            ;;
+    esac
+}
+
 export ANDROID_BUILD_TOP=$(gettop)
 
 . $ANDROID_BUILD_TOP/vendor/lineage/build/envsetup.sh
