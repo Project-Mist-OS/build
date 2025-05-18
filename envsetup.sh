@@ -1241,7 +1241,7 @@ function setup_ccache() {
             [ -z "${CCACHE_DIR}" ] && export CCACHE_DIR="$HOME/.ccache"
             echo "ccache directory found, CCACHE_DIR set to: $CCACHE_DIR" >&2
 
-            CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-40G}"
+            CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-45G}"
             DIRECT_MODE="${DIRECT_MODE:-false}"
 
             $CCACHE_EXEC -o compression=true -o direct_mode="${DIRECT_MODE}" -M "${CCACHE_MAXSIZE}" \
