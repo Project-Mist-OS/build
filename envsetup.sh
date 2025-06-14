@@ -444,6 +444,90 @@ function print_lunch_menu()
     echo
 }
 
+function lunch()
+{
+    local answer
+    setup_cog_env_if_needed
+
+    if [[ $# -gt 1 ]]; then
+        echo "usage: lunch [target]" >&2
+        return 1
+    fi
+
+    local used_lunch_menu=0
+
+    if [ "$1" ]; then
+        answer=$1
+    else
+        print_lunch_menu
+        echo "Which would you like? [aosp_cf_x86_64_phone-trunk_staging-eng]"
+        echo -n "Pick from common choices above (e.g. 13) or specify your own (e.g. aosp_barbet-trunk_staging-eng): "
+        read answer
+        used_lunch_menu=1
+    fi
+
+    local selection=
+
+    if [ -z "$answer" ]
+    then
+        selection=aosp_cf_x86_64_phone-trunk_staging-eng
+    elif (echo -n $answer | grep -q -e "^[0-9][0-9]*$")
+    then
+        local choices=($(TARGET_BUILD_APPS= TARGET_PRODUCT= TARGET_RELEASE= TARGET_BUILD_VARIANT= _get_build_var_cached COMMON_LUNCH_CHOICES 2>/dev/null))
+        if [ $answer -le ${#choices[@]} ]
+        then
+            # array in zsh starts from 1 instead of 0.
+            if [ -n "$ZSH_VERSION" ]
+            then
+                selection=${choices[$(($answer))]}
+            else
+                selection=${choices[$(($answer-1))]}
+            fi
+        fi
+    else
+        selection=$answer
+    fi
+
+    export TARGET_BUILD_APPS=
+
+    # This must be <product>-<release>-<variant>
+    local product release variant
+    # Split string on the '-' character.
+    if [[ $(echo $selection | grep -o "-" | wc -l) = 1 ]];
+    then
+        # Always pick the latest release
+        release=$(grep "BUILD_ID" build/make/core/build_id.mk | tail -1 | cut -d '=' -f 2 | cut -d '.' -f 1 | tr '[:upper:]' '[:lower:]')
+        IFS="-" read -r product variant <<< "$selection"
+    else
+        IFS="-" read -r product release variant <<< "$selection"
+    fi
+
+    if [[ -z "$product" ]] || [[ -z "$release" ]] || [[ -z "$variant" ]]
+    then
+        echo
+        echo "Invalid lunch combo: $selection"
+        echo "Valid combos must be of the form <product>-<release>-<variant>"
+        return 1
+    fi
+
+    if ! check_product $product $release
+    then
+        # if we can't find a product, try to grab it off the LineageOS GitHub
+        T=$(gettop)
+        cd $T > /dev/null
+        vendor/lineage/build/tools/roomservice.py $product
+        cd - > /dev/null
+        check_product $product $release
+    else
+        T=$(gettop)
+        cd $T > /dev/null
+        vendor/lineage/build/tools/roomservice.py $product true
+        cd - > /dev/null
+    fi
+
+    _lunch_meat $product $release $variant
+}
+
 function _lunch_meat()
 {
     local product=$1
@@ -552,7 +636,7 @@ function _lunch_store_leftovers()
     echo "$product $release $variant" > $dot_leftovers
 }
 
-function lunch()
+function lunch2()
 {
     if [[ $# -eq 1 && $1 = "--help" ]]; then
         _lunch_usage
