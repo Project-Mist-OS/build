@@ -15,6 +15,12 @@ $(foreach name, $(_additional_prop_var_names),\
 )
 _additional_prop_var_names :=
 
+# Max out numeric values at 32. Defaults to 32 on bad input.
+clamp32 = $(shell v="$(strip $(1))"; \
+  if echo "$$v " | grep -Eq '^[0-9]+ $$'; then \
+    if [ "$$v" -gt 32 ]; then echo 32; else echo $$v; fi; \
+  else echo 32; fi)
+
 $(KATI_obsolete_var ADDITIONAL_SYSTEM_PROPERTIES,Use build/soong/scripts/gen_build_prop.py instead)
 $(KATI_obsolete_var ADDITIONAL_ODM_PROPERTIES,Use build/soong/scripts/gen_build_prop.py instead)
 $(KATI_obsolete_var ADDITIONAL_PRODUCT_PROPERTIES,Use build/soong/scripts/gen_build_prop.py instead)
@@ -72,7 +78,7 @@ endif
 
 ifdef PRODUCT_SHIPPING_API_LEVEL
 ADDITIONAL_VENDOR_PROPERTIES += \
-    ro.product.first_api_level=$(PRODUCT_SHIPPING_API_LEVEL)
+    ro.product.first_api_level=$(call clamp32,$(PRODUCT_SHIPPING_API_LEVEL))
 endif
 
 ifdef PRODUCT_SHIPPING_VENDOR_API_LEVEL
@@ -95,7 +101,7 @@ endif
 # The values of the GRF properties will be verified by post_process_props.py
 ifdef BOARD_SHIPPING_API_LEVEL
 ADDITIONAL_VENDOR_PROPERTIES += \
-    ro.board.first_api_level=$(BOARD_SHIPPING_API_LEVEL)
+    ro.board.first_api_level=$(call clamp32,$(BOARD_SHIPPING_API_LEVEL))
 endif
 
 # Build system set BOARD_API_LEVEL to show the api level of the vendor API surface.
