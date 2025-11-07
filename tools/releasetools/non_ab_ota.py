@@ -214,6 +214,38 @@ else if get_stage("%(bcb_dev)s") == "3/3" then
   # Dump fingerprints
   script.Print("Target: {}".format(target_info.fingerprint))
 
+  # Build info
+  script.Print("-----------------------------------------------");
+  script.Print("         __  __ _____  _____ _______           ");
+  script.Print("        |  \/  |_   _|/ ____|__   __|          ");
+  script.Print("        | \  / | | | | (___    | |             ");
+  script.Print("        | |\/| | | |  \___ \   | |             ");
+  script.Print("        | |  | |_| |_ ____) |  | |             ");
+  script.Print("        |_|  |_|_____|_____/   |_|             ");
+  script.Print("         ____Beyond The Clouds____             ");
+  script.Print("                                               ");
+  script.Print("-----------------------------------------------");
+
+  buildid = target_info.GetBuildProp("ro.mist.version_display")
+  androidver = target_info.GetBuildProp("ro.build.version.release")
+  buildidn = target_info.GetBuildProp("ro.build.id")
+  buildday = target_info.GetBuildProp("ro.build.date")
+  securep = target_info.GetBuildProp("ro.build.version.security_patch")
+  device = target_info.GetBuildProp("ro.build.product")
+  manufacturer = target_info.GetBuildProp("ro.product.manufacturer")
+  maintainer = target_info.GetBuildProp("ro.mistos.maintainer")
+  script.Print("***********************************************");
+  script.Print(" ROM version      : %s"%(buildid));
+  script.Print(" Android version  : %s"%(androidver));
+  script.Print(" Security patch   : %s"%(securep));
+  script.Print(" Build date       : %s"%(buildday));
+  script.Print("***********************************************");
+  script.Print(" Device           : %s"%(device));
+  script.Print(" Manufacturer     : %s"%(manufacturer));
+  script.Print(" Maintainer       : %s"%(maintainer));
+  script.Print("***********************************************");
+  script.Print("                                         ");
+
   device_specific.FullOTA_InstallBegin()
 
   CopyInstallTools(output_zip)
@@ -428,38 +460,7 @@ else if get_stage("%(bcb_dev)s") != "3/3" then
   script.Print("Source: {}".format(source_info.fingerprint))
   script.Print("Target: {}".format(target_info.fingerprint))
 
-  # Build info
-  script.Print("-----------------------------------------------");
-  script.Print("         __  __ _____  _____ _______           ");
-  script.Print("        |  \/  |_   _|/ ____|__   __|          ");
-  script.Print("        | \  / | | | | (___    | |             ");
-  script.Print("        | |\/| | | |  \___ \   | |             ");
-  script.Print("        | |  | |_| |_ ____) |  | |             ");
-  script.Print("        |_|  |_|_____|_____/   |_|             ");
-  script.Print("         ____Beyond The Clouds____             ");
-  script.Print("                                               ");
-  script.Print("-----------------------------------------------");
-
-  buildid = target_info.GetBuildProp("ro.mist.version_display")
-  androidver = target_info.GetBuildProp("ro.build.version.release")
-  buildidn = target_info.GetBuildProp("ro.build.id")
-  buildday = target_info.GetBuildProp("ro.build.date")
-  securep = target_info.GetBuildProp("ro.build.version.security_patch")
-  device = target_info.GetBuildProp("ro.build.product")
-  manufacturer = target_info.GetBuildProp("ro.product.manufacturer")
-  maintainer = target_info.GetBuildProp("ro.mistos.maintainer")
-  script.Print("***********************************************");
-  script.Print(" ROM version      : %s"%(buildid));
-  script.Print(" Android version  : %s"%(androidver));
-  script.Print(" Security patch   : %s"%(securep));
-  script.Print(" Build date       : %s"%(buildday));
-  script.Print("***********************************************");
-  script.Print(" Device           : %s"%(device));
-  script.Print(" Manufacturer     : %s"%(manufacturer));
-  script.Print(" Maintainer       : %s"%(maintainer));
-  script.Print("***********************************************");
-  script.Print("                                         ");
-
+  script.Print("Verifying current system...")
 
   device_specific.IncrementalOTA_VerifyBegin()
 
