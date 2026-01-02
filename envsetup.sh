@@ -569,6 +569,11 @@ function _lunch_meat()
     fixup_common_out_dir
 
     set_stuff_for_environment
+
+    echo "";
+    cat $(gettop)/build/make/mist_ascii_logo;
+    echo"";
+
     [[ -n "${ANDROID_QUIET_BUILD:-}" ]] || printconfig
 
     if [[ -z "${ANDROID_QUIET_BUILD}" && -z "${LINEAGE_BUILD}" ]]; then
