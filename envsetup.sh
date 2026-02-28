@@ -500,6 +500,36 @@ function _lunch_meat()
     fixup_common_out_dir
 
     set_stuff_for_environment
+
+    echo ""
+
+    LOGO_FILE=$(gettop)/build/make/mist_ascii_logo
+
+    # Hide cursor
+    tput civis
+
+    # Print gradient logo line by line
+    while IFS= read -r line; do
+         echo -e "\033[38;5;196m${line}\033[0m"
+         sleep 0.05
+    done < "$LOGO_FILE"
+
+    echo ""
+
+    # Animated loading text
+    echo -ne "\033[1;97mInitializing MISTOS Build Environment"
+         for i in {1..5}; do
+    echo -ne "."
+    sleep 0.4
+    done
+
+    echo ""
+    echo -e "\033[1;92m✔ Ready to Compile/Build!\033[0m"
+
+    # Show cursor
+    tput cnorm
+    echo ""
+
     [[ -n "${ANDROID_QUIET_BUILD:-}" ]] || printconfig
 
     if [[ -z "${ANDROID_QUIET_BUILD}" && -z "${LINEAGE_BUILD}" ]]; then
