@@ -231,7 +231,7 @@ else if get_stage("%(bcb_dev)s") == "3/3" then
   buildidn = target_info.GetBuildProp("ro.build.id")
   buildday = target_info.GetBuildProp("ro.build.date")
   securep = target_info.GetBuildProp("ro.build.version.security_patch")
-  device = target_info.GetBuildProp("ro.build.product")
+  device = target_info.GetBuildProp("ro.product.name")
   manufacturer = target_info.GetBuildProp("ro.product.manufacturer")
   maintainer = target_info.GetBuildProp("ro.mistos.maintainer")
   script.Print("***********************************************");
