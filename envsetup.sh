@@ -511,7 +511,7 @@ function _lunch_meat()
     # Print gradient logo line by line
     while IFS= read -r line; do
          echo -e "\033[38;5;196m${line}\033[0m"
-         sleep 0.05
+         sleep 0.07
     done < "$LOGO_FILE"
 
     echo ""
@@ -520,7 +520,7 @@ function _lunch_meat()
     echo -ne "\033[1;97mInitializing MISTOS Build Environment"
          for i in {1..5}; do
     echo -ne "."
-    sleep 0.4
+    sleep 0.6
     done
 
     echo ""
