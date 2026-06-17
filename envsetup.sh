@@ -1426,6 +1426,37 @@ function mist() {
     esac
 }
 
+function mistapp() {
+    if [[ -z "$TARGET_PRODUCT" ]]; then
+        echo "Error: No device target selected."
+        echo "Run: mistify <device> [user|userdebug|eng]"
+        return 1
+    fi
+
+    case "${1,,}" in
+        settings)
+            m Settings -j$(nproc --all)
+            ;;
+        launcher)
+            m Launcher3QuickStep -j$(nproc --all)
+            ;;
+        themepicker)
+            m ThemePicker -j$(nproc --all)
+            ;;
+        *)
+            echo ""
+            echo "Usage: mistapp <app>"
+            echo ""
+            echo "Available apps:"
+            echo "  settings"
+            echo "  launcher"
+            echo "  themepicker"
+            echo ""
+            return 1
+            ;;
+    esac
+}
+
 export ANDROID_BUILD_TOP=$(gettop)
 
 . $ANDROID_BUILD_TOP/vendor/lineage/build/envsetup.sh
