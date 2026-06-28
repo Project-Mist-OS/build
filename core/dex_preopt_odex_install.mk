@@ -135,6 +135,11 @@ ifeq ($(LOCAL_MODULE_CLASS),APPS)
     $(my_dexpreopt_libs_compat_29) \
     $(my_dexpreopt_libs_compat_30)
 else
+  # Written to the config unconditionally; reset so non-app modules don't
+  # inherit the last app's compat libs (b/132357300).
+  my_dexpreopt_libs_compat_28 :=
+  my_dexpreopt_libs_compat_29 :=
+  my_dexpreopt_libs_compat_30 :=
   my_dexpreopt_libs_compat :=
 endif
 
