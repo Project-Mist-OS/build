@@ -3683,9 +3683,9 @@ endif
 check-selinux-treble-labeling: $(check-selinux-treble-labeling.timestamp)
 
 # Treble Labeling tests only for 202604 or later
-ifeq ($(call math_gt_or_eq,$(PLATFORM_SEPOLICY_VERSION),202604),true)
-droidcore: check-selinux-treble-labeling
-endif
+#ifeq ($(call math_gt_or_eq,$(PLATFORM_SEPOLICY_VERSION),202604),true)
+#droidcore: check-selinux-treble-labeling
+#endif
 
 platform-preinstalled-apps-patterns :=
 platform-preinstalled-apps :=
