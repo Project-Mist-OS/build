@@ -3709,6 +3709,9 @@ class BlockDifference(object):
     call = ('delete_recursive("/data/resource-cache");')
     script.AppendExtra(script.WordWrap(call))
 
+    call = ('delete_recursive("/data/system_ce/0/overlays.xml");')
+    script.AppendExtra(script.WordWrap(call))
+
     call = ('delete_recursive("/data/system/package_cache");')
     script.AppendExtra(script.WordWrap(call))
 
